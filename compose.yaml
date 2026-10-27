@@ -5,30 +5,15 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "____:3000"            # 1. Port du backend sur l'hôte
+      - "localhost:3000"
     restart: unless-stopped
 
   frontend:
     build:
-      context: ____           # 2. Dossier du frontend
+      context: localhost
       dockerfile: Dockerfile
     ports:
-      - "____:80"              # 3. Port du frontend sur l'hôte
+      - "localhost:80"
     depends_on:
-      - ____                  # 4. Service à démarrer avant le frontend
+      - localhost
     restart: unless-stopped
-
-# 5. Quel nom de service le frontend doit-il utiliser
-#    pour contacter le backend dans le réseau Docker ?
-#    Réponse : ____
-
-# 6. Quelle commande démarre les deux services
-#    en reconstruisant les images ?
-#    Réponse : ____
-
-# 7. Quelle commande affiche les conteneurs du projet ?
-#    Réponse : ____
-
-# 8. Quelle commande arrête et supprime les conteneurs
-#    du projet ?
-#    Réponse : ____
