@@ -1,9 +1,9 @@
 name: CI/CD
 
+# Pas de déclencheur pull_request : la PR dev → main est validée par les checks
+# du push sur dev (même commit), et main n'est modifiable que par cette PR.
 on:
   push:
-    branches: [main, dev]
-  pull_request:
     branches: [main, dev]
   workflow_dispatch:
 
@@ -125,6 +125,34 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.app }}
+
+  open-pr:
+    name: Ouverture PR dev → main
+    needs: build-scan-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # Une seule PR ouverte à la fois : les pushs suivants sur dev la mettent à jour d'eux-mêmes
+      - name: Créer la PR si besoin
+        run: |
+          existing=$(gh pr list --base main --head dev --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "PR #$existing déjà ouverte, mise à jour avec ${GITHUB_SHA::7}"
+            exit 0
+          fi
+          if [ "$(gh api "repos/$GH_REPO/compare/main...dev" --jq '.ahead_by')" = "0" ]; then
+            echo "dev n'a aucun commit d'avance sur main, rien à proposer"
+            exit 0
+          fi
+          gh pr create --base main --head dev \
+            --title "Release dev → main (${GITHUB_SHA::7})" \
+            --body "Tests, npm audit, Gitleaks et Trivy validés sur \`${GITHUB_SHA::7}\` ; images poussées sur Docker Hub (tags \`*-sha-${GITHUB_SHA::7}\`). Le merge déclenche le déploiement sur la VM."
 
   deploy:
     name: Déploiement (VM)
