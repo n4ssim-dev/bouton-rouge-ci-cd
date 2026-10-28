@@ -91,3 +91,12 @@ describe("POST /click", () => {
 		expect(res.status).toBe(400);
 	});
 });
+
+describe("GET /health", () => {
+	test("répond ok", async () => {
+		const res = await request(app).get("/health");
+
+		expect(res.status).toBe(200);
+		expect(res.body.status).toBe("ok");
+	});
+});

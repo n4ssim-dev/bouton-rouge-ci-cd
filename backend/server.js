@@ -8,6 +8,10 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+app.get("/health", (req, res) => {
+	return res.json({ status: "ok" });
+});
+
 app.post("/login", (req, res) => {
 	const { username, password } = req.body || {};
 
