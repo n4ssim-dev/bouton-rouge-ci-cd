@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  REGISTRY: ghcr.io
+  IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/bouton-rouge
 
 jobs:
   unit-tests:
@@ -67,9 +67,6 @@ jobs:
     name: Build, Trivy & push (${{ matrix.app }})
     needs: [unit-tests, npm-audit, gitleaks]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -82,12 +79,15 @@ jobs:
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.app }}
+          # Un seul dépôt Docker Hub : l'app est distinguée par le préfixe du tag (backend-latest, frontend-sha-xxx…)
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch,prefix=${{ matrix.app }}-
+            type=ref,event=pr,prefix=${{ matrix.app }}-pr-
+            type=sha,prefix=${{ matrix.app }}-sha-
+            type=raw,value=${{ matrix.app }}-latest,enable={{is_default_branch}}
 
       # Build local de l'image pour la scanner avant tout push
       - name: Build
@@ -108,13 +108,12 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
-      - name: Login GHCR
+      - name: Login Docker Hub
         if: github.event_name != 'pull_request'
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Push uniquement si le scan Trivy est passé (le cache évite de tout reconstruire)
       - name: Push
