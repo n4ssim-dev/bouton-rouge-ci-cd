@@ -19,9 +19,9 @@ La pipeline se déclenche à chaque push sur `dev` ou `main`, ou manuellement vi
 | --- | --- | --- |
 | **Détection des changements** | Liste les apps (`backend`, `frontend`) modifiées par le push | Toujours |
 | **Tests unitaires** | `npm test` (Jest + Supertest) sur le backend | Si `backend/` est modifié |
-| **npm audit** | Analyse des dépendances, échec à partir du niveau `high` | Pour chaque app modifiée |
+| **npm audit** | Analyse des dépendances, échec à partir du niveau `high` | Toujours lancé pour les deux apps, étapes sautées si l'app n'est pas modifiée |
 | **Gitleaks** | Détection de secrets dans tout l'historique Git | Toujours |
-| **Build, Trivy & push** | Build des images Docker, scan Trivy (`CRITICAL`/`HIGH` corrigeables), puis push sur Docker Hub uniquement si le scan passe | Pour chaque app modifiée, si aucun job précédent n'a échoué |
+| **Build, Trivy & push** | Build des images Docker, scan Trivy (`CRITICAL`/`HIGH` corrigeables), puis push sur Docker Hub uniquement si le scan passe | Toujours lancé pour les deux apps si aucun job précédent n'a échoué, étapes sautées si l'app n'est pas modifiée |
 | **Ouverture PR dev → main** | Ouvre automatiquement une PR vers `main` (une seule à la fois) | Sur `dev`, après un build réussi |
 | **Déploiement (VM)** | Exécuté par le runner auto-hébergé, il met à jour la stack sur la VM | Sur `main`, après un build réussi |
 
@@ -29,10 +29,12 @@ La pipeline se déclenche à chaque push sur `dev` ou `main`, ou manuellement vi
 
 Le job de détection compare le commit poussé au précédent (API GitHub `compare`) pour savoir quelles apps ont changé :
 
-- **Aucune modification dans `backend/` ni `frontend/`** (README, `deploy/`, workflow…) : seul Gitleaks s'exécute. Pas de tests, pas d'image, pas de PR, pas de déploiement.
+- **Aucune modification dans `backend/` ni `frontend/`** (README, `deploy/`, workflow…) : seul Gitleaks effectue un contrôle, les autres jobs sont vides ou sautés. Pas de tests, pas d'image, pas de PR, pas de déploiement.
 - **Une seule app modifiée** : seuls ses contrôles et son image sont traités. Le déploiement ne recrée que le conteneur concerné.
 - **Merge vers `main`** : la comparaison couvre tous les commits fusionnés, donc chaque app touchée est reconstruite.
 - **Lancement manuel, nouvelle branche ou comparaison impossible** : toutes les apps sont traitées par précaution.
+
+Les jobs `npm audit` et `Build, Trivy & push` gardent une matrice fixe (`backend`, `frontend`) : ils sont requis par la protection de `main`, ils doivent donc toujours rapporter un statut pour ne pas bloquer la PR.
 
 Les images sont poussées dans un seul dépôt Docker Hub (`n4ssim11/bouton-rouge`) et sont différenciées par le préfixe du tag : `backend-latest`, `frontend-sha-xxxxxxx`, etc.
 
