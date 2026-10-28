@@ -14,8 +14,42 @@ env:
   IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/bouton-rouge
 
 jobs:
+  # Liste les apps (backend, frontend) modifiées par le push : les jobs suivants ne
+  # traitent qu'elles, et si aucune ne l'est il n'y a ni tests, ni image, ni PR, ni déploiement
+  changes:
+    name: Détection des changements
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.diff.outputs.apps }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # workflow_dispatch, nouvelle branche ou comparaison impossible : on traite tout
+          all=$'backend/\nfrontend/'
+          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            files=$all
+          else
+            files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$GITHUB_SHA" --jq '.files[].filename') || files=$all
+          fi
+
+          apps=()
+          for app in backend frontend; do
+            if grep -q "^$app/" <<<"$files"; then
+              apps+=("$app")
+            fi
+          done
+
+          json=$(jq -cn '$ARGS.positional' --args "${apps[@]}")
+          echo "Apps modifiées : $json"
+          echo "apps=$json" >> "$GITHUB_OUTPUT"
+
   unit-tests:
     name: Tests unitaires (backend)
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.apps), 'backend')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,11 +68,13 @@ jobs:
 
   npm-audit:
     name: npm audit (${{ matrix.app }})
+    needs: changes
+    if: needs.changes.outputs.apps != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app: [backend, frontend]
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -65,12 +101,18 @@ jobs:
 
   build-scan-push:
     name: Build, Trivy & push (${{ matrix.app }})
-    needs: [unit-tests, npm-audit, gitleaks]
+    needs: [changes, unit-tests, npm-audit, gitleaks]
+    # unit-tests est sauté quand seul le frontend change : on accepte « skipped », pas un échec
+    if: >-
+      !cancelled()
+      && needs.changes.outputs.apps != '[]'
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app: [backend, frontend]
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
