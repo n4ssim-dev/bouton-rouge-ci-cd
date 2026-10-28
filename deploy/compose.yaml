@@ -1,0 +1,33 @@
+# Stack de production : installée dans /opt/bouton-rouge-nassim sur la VM.
+# Uniquement des images Docker Hub, aucun build (le code source n'est pas sur la VM).
+name: bouton-rouge-nassim
+
+services:
+  backend:
+    image: ${DOCKERHUB_USERNAME:-n4ssim11}/bouton-rouge:backend-${TAG:-latest}
+    environment:
+      - PORT=3002
+    ports:
+      - "127.0.0.1:3002:3002"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:$${PORT}/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  frontend:
+    image: ${DOCKERHUB_USERNAME:-n4ssim11}/bouton-rouge:frontend-${TAG:-latest}
+    ports:
+      - "${FRONT_PORT:-82}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
