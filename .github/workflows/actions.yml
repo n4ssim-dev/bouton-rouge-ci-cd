@@ -125,3 +125,22 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.app }}
+
+  deploy:
+    name: Déploiement (VM)
+    needs: build-scan-push
+    # Jamais sur pull_request : le runner auto-hébergé exécuterait du code non relu
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux]
+    env:
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Déploie exactement l'image du commit testé et scanné (tag backend-sha-xxxxxxx)
+      - name: Déployer
+        run: |
+          export TAG="sha-${GITHUB_SHA::7}"
+          docker compose pull
+          docker compose up -d --no-build --wait --remove-orphans
+          docker image prune -f
