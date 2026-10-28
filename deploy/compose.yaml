@@ -7,8 +7,8 @@ services:
     image: ${DOCKERHUB_USERNAME:-n4ssim11}/bouton-rouge:backend-${TAG:-latest}
     environment:
       - PORT=3002
-    ports:
-      - "127.0.0.1:3002:3002"
+    # Pas de port publié : nginx joint l'API via le réseau Docker (backend:3002),
+    # ce qui évite tout conflit de port sur la VM partagée
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:$${PORT}/health || exit 1"]
       interval: 30s
