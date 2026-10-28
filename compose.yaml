@@ -5,9 +5,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      - PORT=3000
+      - PORT=3002
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3002:3002"
     healthcheck:
       test: ["CMD", "node", "-e", "require('net').connect(3000, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"]
       interval: 30s
@@ -21,7 +21,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "80:80"
+      - "82:82"
     depends_on:
       backend:
         condition: service_healthy
