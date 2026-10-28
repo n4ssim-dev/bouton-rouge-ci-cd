@@ -1,9 +1,9 @@
 name: CI/CD
 
+# Pas de déclencheur pull_request : la PR dev → main est validée par les checks
+# du push sur dev (même commit), et main n'est modifiable que par cette PR.
 on:
   push:
-    branches: [main, dev]
-  pull_request:
     branches: [main, dev]
   workflow_dispatch:
 
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  REGISTRY: ghcr.io
+  IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/bouton-rouge
 
 jobs:
   unit-tests:
@@ -67,9 +67,6 @@ jobs:
     name: Build, Trivy & push (${{ matrix.app }})
     needs: [unit-tests, npm-audit, gitleaks]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -82,12 +79,15 @@ jobs:
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.app }}
+          # Un seul dépôt Docker Hub : l'app est distinguée par le préfixe du tag (backend-latest, frontend-sha-xxx…)
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch,prefix=${{ matrix.app }}-
+            type=ref,event=pr,prefix=${{ matrix.app }}-pr-
+            type=sha,prefix=${{ matrix.app }}-sha-
+            type=raw,value=${{ matrix.app }}-latest,enable={{is_default_branch}}
 
       # Build local de l'image pour la scanner avant tout push
       - name: Build
@@ -108,13 +108,12 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
-      - name: Login GHCR
+      - name: Login Docker Hub
         if: github.event_name != 'pull_request'
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Push uniquement si le scan Trivy est passé (le cache évite de tout reconstruire)
       - name: Push
@@ -126,3 +125,50 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.app }}
+
+  open-pr:
+    name: Ouverture PR dev → main
+    needs: build-scan-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # Une seule PR ouverte à la fois : les pushs suivants sur dev la mettent à jour d'eux-mêmes
+      - name: Créer la PR si besoin
+        run: |
+          existing=$(gh pr list --base main --head dev --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "PR #$existing déjà ouverte, mise à jour avec ${GITHUB_SHA::7}"
+            exit 0
+          fi
+          if [ "$(gh api "repos/$GH_REPO/compare/main...dev" --jq '.ahead_by')" = "0" ]; then
+            echo "dev n'a aucun commit d'avance sur main, rien à proposer"
+            exit 0
+          fi
+          gh pr create --base main --head dev \
+            --title "Release dev → main (${GITHUB_SHA::7})" \
+            --body "Tests, npm audit, Gitleaks et Trivy validés sur \`${GITHUB_SHA::7}\` ; images poussées sur Docker Hub (tags \`*-sha-${GITHUB_SHA::7}\`). Le merge déclenche le déploiement sur la VM."
+
+  deploy:
+    name: Déploiement (VM)
+    needs: build-scan-push
+    # Jamais sur pull_request : le runner auto-hébergé exécuterait du code non relu
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux]
+    env:
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Déploie exactement l'image du commit testé et scanné (tag backend-sha-xxxxxxx)
+      - name: Déployer
+        run: |
+          export TAG="sha-${GITHUB_SHA::7}"
+          docker compose pull
+          docker compose up -d --no-build --wait --remove-orphans
+          docker image prune -f
